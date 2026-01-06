@@ -187,23 +187,29 @@ encode_video() {
   "${av1an_cmd[@]}" 2>&1 | tee "$temp_log"
   encode_result=${PIPESTATUS[0]}
   
-  # check for frame mismatch or pixel format errors
+  # check for frame mismatch, pixel format, or timestamp errors
   if [ $encode_result -ne 0 ] \
     && (grep -q "FRAME MISMATCH" "$temp_log" \
-    || grep -q "does not support YUVJ420P" "$temp_log"); then
+    || grep -q "does not support YUVJ420P" "$temp_log" \
+    || grep -q "Timestamps are unset" "$temp_log" \
+    || grep -q "unknown timestamp" "$temp_log"); then
 
     if grep -q "FRAME MISMATCH" "$temp_log"; then
       log_warn "frame mismatch detected - retrying with direct ffmpeg (no chunking)"
     elif grep -q "does not support YUVJ420P" "$temp_log"; then
       log_warn "YUVJ420P pixel format detected - retrying with direct ffmpeg (with conversion)"
+    elif grep -q "Timestamps are unset\|unknown timestamp" "$temp_log"; then
+      log_warn "timestamp corruption detected - retrying with direct ffmpeg (regenerating timestamps)"
     fi
     
     # remove output file from failed attempt
     rm -f "$out_file"
     
     # use ffmpeg directly (no av1an, no chunking)
+    # -fflags +genpts regenerates timestamps for corrupted files
     # -pix_fmt yuv420p handles YUVJ420P conversion
-    if ffmpeg -i "$in_file" \
+    if ffmpeg -fflags +genpts \
+      -i "$in_file" \
       -pix_fmt yuv420p \
       -c:v libsvtav1 \
       -preset "$PRESET" \
